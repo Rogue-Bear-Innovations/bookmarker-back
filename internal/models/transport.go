@@ -5,9 +5,14 @@ type UserReq struct {
 }
 
 type BookmarkReq struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	Link        *string `json:"link"`
+	Name        *string  `json:"name"`
+	Description *string  `json:"description"`
+	Link        *string  `json:"link"`
+	Tags        []uint64 `json:"tags"`
+}
+
+type BookmarkReqList struct {
+	Tags []uint64 `json:"tags"`
 }
 
 type BookmarkResp struct {

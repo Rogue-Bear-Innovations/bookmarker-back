@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Masterminds/squirrel"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -131,8 +132,29 @@ func main() {
 			return err
 		}
 
+		req := models.BookmarkReqList{}
+		if err := BindAndValidate(c, &req); err != nil {
+			return err
+		}
+
+		w := squirrel.Eq{
+			"b.user_id": user.ID,
+		}
+		if len(req.Tags) != 0 {
+			w["tb.tag_id"] = req.Tags
+		}
+		sql, args, err := squirrel.
+			Select("b.id", "b.link", "b.name", "b.description").From("bookmarks b").
+			LeftJoin("tag_bookmarks tb ON b.id = tb.bookmark_id").
+			OrderBy("b.id").
+			Where(w).
+			ToSql()
+		if err != nil {
+			return err
+		}
+
 		bookmarks := make([]models.Bookmark, 0)
-		res := db.Where("user_id = ?", user.ID).Find(&bookmarks)
+		res := db.Raw(sql, args...).Scan(&bookmarks)
 		if res.Error != nil {
 			return res.Error
 		}
@@ -159,11 +181,21 @@ func main() {
 			return err
 		}
 
+		newTags := make([]models.Tag, len(req.Tags))
+		for i := range req.Tags {
+			newTags[i] = models.Tag{
+				Model: gorm.Model{
+					ID: uint(req.Tags[i]),
+				},
+			}
+		}
+
 		model := models.Bookmark{
 			Name:        req.Name,
 			Link:        req.Link,
 			Description: req.Description,
 			UserID:      user.ID,
+			Tags:        newTags,
 		}
 
 		res := db.Create(&model)
@@ -193,6 +225,15 @@ func main() {
 			return err
 		}
 
+		newTags := make([]models.Tag, len(req.Tags))
+		for i := range req.Tags {
+			newTags[i] = models.Tag{
+				Model: gorm.Model{
+					ID: uint(req.Tags[i]),
+				},
+			}
+		}
+
 		model := models.Bookmark{
 			Model: gorm.Model{
 				ID: uint(id),
@@ -201,6 +242,7 @@ func main() {
 			Link:        req.Link,
 			Description: req.Description,
 			UserID:      user.ID,
+			Tags:        newTags,
 		}
 
 		res := db.Model(&model).Updates(&model)

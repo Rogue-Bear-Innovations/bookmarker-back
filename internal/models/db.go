@@ -21,6 +21,7 @@ type (
 		Description *string
 		UserID      uint `gorm:"not null"`
 		User        User
+		Tags        []Tag `gorm:"many2many:tag_bookmarks;"`
 	}
 
 	Tag struct {
