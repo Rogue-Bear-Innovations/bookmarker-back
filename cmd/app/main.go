@@ -5,14 +5,14 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/labstack/gommon/log"
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 
 	"github.com/go-playground/validator"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-	"gorm.io/driver/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -44,6 +44,16 @@ type (
 		Name      string     `gorm:"not null"`
 		Bookmarks []Bookmark `gorm:"many2many:tag_bookmarks;"`
 	}
+
+	Config struct {
+		Host       string `mapstructure:"HOST"`
+		Port       string `mapstructure:"PORT"`
+		DBHost     string `mapstructure:"DB_HOST"`
+		DBPort     string `mapstructure:"DB_PORT"`
+		DBUser     string `mapstructure:"DB_USER"`
+		DBPassword string `mapstructure:"DB_PASSWORD"`
+		DBName     string `mapstructure:"DB_NAME"`
+	}
 )
 
 func (cv *CustomValidator) Validate(i interface{}) error {
@@ -54,12 +64,38 @@ func (cv *CustomValidator) Validate(i interface{}) error {
 }
 
 func main() {
-	db, err := gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
+	viper.SetEnvPrefix("BOOKMARKER")
+
+	viper.SetDefault("HOST", "0.0.0.0")
+	viper.SetDefault("PORT", "1323")
+	viper.SetDefault("DB_HOST", "0.0.0.0")
+	viper.SetDefault("DB_PORT", "5432")
+	viper.SetDefault("DB_USER", "user")
+	viper.SetDefault("DB_PASSWORD", "password")
+	viper.SetDefault("DB_NAME", "db")
+
+	envs := []string{"HOST", "PORT", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME"}
+	for _, key := range envs {
+		if err := viper.BindEnv(key); err != nil {
+			panic(err)
+		}
+	}
+
+	cfg := Config{}
+	if err := viper.Unmarshal(&cfg); err != nil {
+		panic(err)
+	}
+	fmt.Println(cfg)
+
+	/////////
+
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
+		cfg.DBHost, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBPort)
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		panic("failed to connect database")
 	}
 
-	// Migrate the schema
 	if err := db.AutoMigrate(&Bookmark{}); err != nil {
 		panic(err)
 	}
@@ -111,6 +147,8 @@ func main() {
 	//
 	//})
 
+	e.GET("/ping", func(c echo.Context) error { return c.String(http.StatusOK, "pong") })
+
 	e.Use(middleware.CORS())
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
@@ -119,7 +157,7 @@ func main() {
 	}
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			if c.Path() == "/auth/register" {
+			if c.Path() == "/auth/register" || c.Path() == "/ping" {
 				return next(c)
 			}
 			token := ""
@@ -135,7 +173,7 @@ func main() {
 			user := User{}
 			res := db.Where("token = ?", token).First(&user)
 			if res.Error != nil {
-				log.Error(errors.Wrap(err, "find user in db"))
+				c.Logger().Error(errors.Wrap(err, "find user in db"))
 				return c.NoContent(http.StatusUnauthorized)
 			}
 
@@ -143,5 +181,6 @@ func main() {
 			return next(c)
 		}
 	})
-	e.Logger.Fatal(e.Start(":1323"))
+	listen := cfg.Host + ":" + cfg.Port
+	e.Logger.Fatal(e.Start(listen))
 }
