@@ -224,7 +224,100 @@ func main() {
 		if res.Error != nil {
 			return res.Error
 		}
-		return c.NoContent(http.StatusOK)
+		return c.NoContent(http.StatusNoContent)
+	})
+
+	tagG := e.Group("/tag")
+	tagG.GET("", func(c echo.Context) error {
+		user, err := GetUserFromContext(c)
+		if err != nil {
+			return err
+		}
+
+		tags := make([]models.Tag, 0)
+		res := db.Where("user_id = ?", user.ID).Find(&tags)
+		if res.Error != nil {
+			return res.Error
+		}
+
+		resp := make([]models.TagResp, len(tags))
+		for i := range tags {
+			resp[i] = models.TagResp{
+				ID:   tags[i].ID,
+				Name: tags[i].Name,
+			}
+		}
+		return c.JSON(http.StatusOK, resp)
+	})
+	tagG.POST("", func(c echo.Context) error {
+		user, err := GetUserFromContext(c)
+		if err != nil {
+			return err
+		}
+
+		req := models.TagReq{}
+		if err := BindAndValidate(c, &req); err != nil {
+			return err
+		}
+
+		model := models.Tag{
+			Name:   req.Name,
+			UserID: uint64(user.ID),
+		}
+
+		res := db.Create(&model)
+		if res.Error != nil {
+			return res.Error
+		}
+
+		return c.JSON(http.StatusOK, models.TagResp{
+			ID:   model.ID,
+			Name: model.Name,
+		})
+	})
+	tagG.PATCH("/:id", func(c echo.Context) error {
+		id, err := GetAndParseParam(c, "id")
+		if err != nil {
+			return err
+		}
+		user, err := GetUserFromContext(c)
+		if err != nil {
+			return err
+		}
+
+		req := models.TagReq{}
+		if err := BindAndValidate(c, &req); err != nil {
+			return err
+		}
+
+		model := models.Tag{
+			Model: gorm.Model{
+				ID: uint(id),
+			},
+			Name:   req.Name,
+			UserID: uint64(user.ID),
+		}
+
+		res := db.Model(&model).Updates(&model)
+		if res.Error != nil {
+			return res.Error
+		}
+
+		return c.JSON(http.StatusOK, models.TagResp{
+			ID:   model.ID,
+			Name: model.Name,
+		})
+	})
+	tagG.DELETE("/:id", func(c echo.Context) error {
+		id := c.Param("id")
+		if id == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid path param 'id'")
+		}
+		res := db.Delete(&models.Tag{}, id)
+		if res.Error != nil {
+			return res.Error
+		}
+		return c.NoContent(http.StatusNoContent)
 	})
 
 	e.GET("/ping", func(c echo.Context) error { return c.String(http.StatusOK, "pong") })

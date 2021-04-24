@@ -16,3 +16,12 @@ type BookmarkResp struct {
 	Link        *string `json:"link,omitempty"`
 	Description *string `json:"description,omitempty"`
 }
+
+type TagReq struct {
+	Name string `json:"name" validate:"required"`
+}
+
+type TagResp struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+}

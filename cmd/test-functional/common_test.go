@@ -70,3 +70,50 @@ func TestRegister(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, resp.StatusCode())
 	})
 }
+
+//
+//func TestBookmarksCrud(t *testing.T) {
+//	defer FlushDB()
+//
+//	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+//	defer cancel()
+//
+//	listURL := AppBaseURL
+//	listURL.Path = "/bookmark/list"
+//
+//	//////
+//
+//	_, err := DBConn.Exec(ctx, "INSERT INTO users (id, token) VALUES (1, 'token')")
+//	assert.Nil(t, err)
+//	_, err = DBConn.Exec(ctx, "INSERT INTO bookmarks (name, description, link, user_id) VALUES ('name', 'desc', 'link', 1)")
+//	_, err = DBConn.Exec(ctx, "INSERT INTO bookmarks (name, description, link, user_id) VALUES ('name', 'desc', 'link', 1)")
+//	assert.Nil(t, err)
+//
+//	//////
+//
+//	resp, err := resty.New().
+//		R().
+//		SetHeader("Content-Type", "application/json").
+//		SetContext(ctx).
+//		SetResult(&[]models.BookmarkResp{}).
+//		Get(listURL.String())
+//	assert.Nil(t, err)
+//
+//	assert.Equal(t, http.StatusOK, resp.StatusCode())
+//
+//	n := "name"
+//	d := "desc"
+//	l := "link"
+//	gotp, ok := resp.Result().(*[]models.BookmarkResp)
+//	assert.True(t, ok)
+//	got := *gotp
+//	assert.Equal(t, []models.BookmarkResp{{
+//		Name:        &n,
+//		Link:        &d,
+//		Description: &l,
+//	},{
+//		Name:        &n,
+//		Link:        &d,
+//		Description: &l,
+//	}}, got)
+//}
