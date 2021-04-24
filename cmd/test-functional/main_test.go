@@ -9,7 +9,13 @@ import (
 	"time"
 
 	"github.com/go-resty/resty/v2"
+	"github.com/jackc/pgx/v4"
 	"github.com/spf13/viper"
+)
+
+var (
+	DBConn     *pgx.Conn
+	AppBaseURL url.URL
 )
 
 type (
@@ -77,5 +83,38 @@ func TestMain(m *testing.M) {
 
 	///////
 
+	AppBaseURL = url.URL{
+		Scheme: "http",
+		Host:   cfg.Host + ":" + cfg.Port,
+	}
+
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
+		cfg.DBHost, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBPort)
+	conn, err := pgx.Connect(context.Background(), dsn)
+	if err != nil {
+		panic(err)
+	}
+	DBConn = conn
+
+	/////////
+
 	os.Exit(m.Run())
+}
+
+func FlushDB() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
+	defer cancel()
+
+	if _, err := DBConn.Exec(ctx, "DELETE from tag_bookmarks"); err != nil {
+		panic(err)
+	}
+	if _, err := DBConn.Exec(ctx, "DELETE from bookmarks"); err != nil {
+		panic(err)
+	}
+	if _, err := DBConn.Exec(ctx, "DELETE from tags"); err != nil {
+		panic(err)
+	}
+	if _, err := DBConn.Exec(ctx, "DELETE from users"); err != nil {
+		panic(err)
+	}
 }
