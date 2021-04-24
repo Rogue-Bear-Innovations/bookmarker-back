@@ -2,59 +2,30 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/labstack/echo/v4/middleware"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
+	"gorm.io/gorm/logger"
 
 	"github.com/go-playground/validator"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+
+	"github.com/Rogue-Bear-Innovations/bookmarker-back/internal/models"
 )
 
 type (
 	CustomValidator struct {
 		validator *validator.Validate
-	}
-
-	UserReq struct {
-		Email string `json:"email" validate:"required,email"`
-	}
-
-	BookmarkReq struct {
-		Name        *string `json:"name"`
-		Description *string `json:"description"`
-		Link        *string `json:"link"`
-	}
-
-	User struct {
-		gorm.Model
-		Email     string `gorm:"unique;not null"`
-		Password  string `gorm:"not null"`
-		Token     string `gorm:"not null"`
-		Bookmarks []Bookmark
-		Tags      []Tag
-	}
-
-	Bookmark struct {
-		gorm.Model
-		Name        *string
-		Link        *string
-		Description *string
-		UserID      uint `gorm:"not null"`
-		User        User
-	}
-
-	Tag struct {
-		gorm.Model
-		Name      string     `gorm:"not null;uniqueIndex:uidx_name_user_id"`
-		Bookmarks []Bookmark `gorm:"many2many:tag_bookmarks;"`
-		UserID    uint64     `gorm:"not null;uniqueIndex:uidx_name_user_id"`
-		User      User
 	}
 
 	Config struct {
@@ -65,13 +36,6 @@ type (
 		DBUser     string `mapstructure:"DB_USER"`
 		DBPassword string `mapstructure:"DB_PASSWORD"`
 		DBName     string `mapstructure:"DB_NAME"`
-	}
-
-	BookmarkResp struct {
-		ID          uint    `json:"id"`
-		Name        *string `json:"name,omitempty"`
-		Link        *string `json:"link,omitempty"`
-		Description *string `json:"description,omitempty"`
 	}
 )
 
@@ -108,36 +72,44 @@ func main() {
 
 	/////////
 
+	newLogger := logger.New(log.New(os.Stdout, "\r\n", log.LstdFlags), logger.Config{
+		SlowThreshold:             200 * time.Millisecond,
+		LogLevel:                  logger.Info,
+		Colorful:                  true,
+		IgnoreRecordNotFoundError: false,
+	})
+
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
 		cfg.DBHost, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBPort)
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: newLogger,
+	})
 	if err != nil {
 		panic("failed to connect database")
 	}
 
-	if err := db.AutoMigrate(&User{}); err != nil {
+	if err := db.AutoMigrate(&models.User{}); err != nil {
 		panic(err)
 	}
-	if err := db.AutoMigrate(&Bookmark{}); err != nil {
+	if err := db.AutoMigrate(&models.Bookmark{}); err != nil {
 		panic(err)
 	}
-	if err := db.AutoMigrate(&Tag{}); err != nil {
+	if err := db.AutoMigrate(&models.Tag{}); err != nil {
 		panic(err)
 	}
 
 	////////
 
 	e := echo.New()
-	e.Validator = &CustomValidator{validator: validator.New()}
 
 	e.POST("/auth/register", func(c echo.Context) error {
-		u := UserReq{}
+		u := models.UserReq{}
 		if err := BindAndValidate(c, &u); err != nil {
 			return err
 		}
 
 		token := uuid.New().String()
-		res := db.Create(&User{
+		res := db.Create(&models.User{
 			Email: u.Email,
 			Token: token,
 		})
@@ -159,15 +131,15 @@ func main() {
 			return err
 		}
 
-		bookmarks := make([]Bookmark, 0)
+		bookmarks := make([]models.Bookmark, 0)
 		res := db.Where("user_id = ?", user.ID).Find(&bookmarks)
 		if res.Error != nil {
 			return res.Error
 		}
 
-		resp := make([]BookmarkResp, len(bookmarks))
+		resp := make([]models.BookmarkResp, len(bookmarks))
 		for i := range bookmarks {
-			resp[i] = BookmarkResp{
+			resp[i] = models.BookmarkResp{
 				ID:          bookmarks[i].ID,
 				Name:        bookmarks[i].Name,
 				Link:        bookmarks[i].Link,
@@ -182,39 +154,85 @@ func main() {
 			return err
 		}
 
-		req := BookmarkReq{}
+		req := models.BookmarkReq{}
 		if err := BindAndValidate(c, &req); err != nil {
 			return err
 		}
 
-		model := Bookmark{
+		model := models.Bookmark{
 			Name:        req.Name,
 			Link:        req.Link,
 			Description: req.Description,
 			UserID:      user.ID,
 		}
 
-		res := db.Create(model)
+		res := db.Create(&model)
 		if res.Error != nil {
 			return res.Error
 		}
 
-		return c.JSON(http.StatusOK, BookmarkResp{
+		return c.JSON(http.StatusOK, models.BookmarkResp{
 			ID:          model.ID,
 			Name:        model.Name,
 			Link:        model.Link,
 			Description: model.Description,
 		})
 	})
-	//bookmarkG.DELETE("/:id", func(c echo.Context) error {
-	//
-	//})
+	bookmarkG.PATCH("/:id", func(c echo.Context) error {
+		id, err := GetAndParseParam(c, "id")
+		if err != nil {
+			return err
+		}
+		user, err := GetUserFromContext(c)
+		if err != nil {
+			return err
+		}
+
+		req := models.BookmarkReq{}
+		if err := BindAndValidate(c, &req); err != nil {
+			return err
+		}
+
+		model := models.Bookmark{
+			Model: gorm.Model{
+				ID: uint(id),
+			},
+			Name:        req.Name,
+			Link:        req.Link,
+			Description: req.Description,
+			UserID:      user.ID,
+		}
+
+		res := db.Model(&model).Updates(&model)
+		if res.Error != nil {
+			return res.Error
+		}
+
+		return c.JSON(http.StatusOK, models.BookmarkResp{
+			ID:          model.ID,
+			Name:        model.Name,
+			Link:        model.Link,
+			Description: model.Description,
+		})
+	})
+	bookmarkG.DELETE("/:id", func(c echo.Context) error {
+		id := c.Param("id")
+		if id == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid path param 'id'")
+		}
+		res := db.Delete(&models.Bookmark{}, id)
+		if res.Error != nil {
+			return res.Error
+		}
+		return c.NoContent(http.StatusOK)
+	})
 
 	e.GET("/ping", func(c echo.Context) error { return c.String(http.StatusOK, "pong") })
 
 	e.Use(middleware.CORS())
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
+	e.Validator = &CustomValidator{validator: validator.New()}
 	echo.NotFoundHandler = func(c echo.Context) error {
 		return c.NoContent(http.StatusNotFound)
 	}
@@ -233,7 +251,7 @@ func main() {
 			if token == "" {
 				return c.NoContent(http.StatusUnauthorized)
 			}
-			user := User{}
+			user := models.User{}
 			res := db.Where("token = ?", token).First(&user)
 			if res.Error != nil {
 				c.Logger().Error(errors.Wrap(err, "find user in db"))
@@ -244,6 +262,7 @@ func main() {
 			return next(c)
 		}
 	})
+
 	listen := cfg.Host + ":" + cfg.Port
 	e.Logger.Fatal(e.Start(listen))
 }
@@ -259,10 +278,30 @@ func BindAndValidate(c echo.Context, v interface{}) error {
 	return nil
 }
 
-func GetUserFromContext(c echo.Context) (*User, error) {
-	user := c.Get("user").(*User)
+func GetUserFromContext(c echo.Context) (*models.User, error) {
+	user := c.Get("user").(*models.User)
 	if user == nil {
 		return nil, errors.New("no user found in context")
 	}
 	return user, nil
+}
+
+func GetParam(c echo.Context, name string) (string, error) {
+	value := c.Param(name)
+	if value == "" {
+		return "", echo.NewHTTPError(http.StatusBadRequest, "invalid path param 'id'")
+	}
+	return value, nil
+}
+
+func GetAndParseParam(c echo.Context, name string) (uint64, error) {
+	v, e := GetParam(c, name)
+	if e != nil {
+		return 0, e
+	}
+	vv, e := strconv.ParseUint(v, 10, 64)
+	if e != nil {
+		return 0, e
+	}
+	return vv, nil
 }
