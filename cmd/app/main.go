@@ -25,6 +25,12 @@ type (
 		Email string `json:"email" validate:"required,email"`
 	}
 
+	BookmarkReq struct {
+		Name        *string `json:"name"`
+		Description *string `json:"description"`
+		Link        *string `json:"link"`
+	}
+
 	User struct {
 		gorm.Model
 		Email     string `gorm:"unique;not null"`
@@ -36,10 +42,10 @@ type (
 
 	Bookmark struct {
 		gorm.Model
-		Name        string
-		Link        string
-		Description string
-		UserID      uint64 `gorm:"not null"`
+		Name        *string
+		Link        *string
+		Description *string
+		UserID      uint `gorm:"not null"`
 		User        User
 	}
 
@@ -59,6 +65,13 @@ type (
 		DBUser     string `mapstructure:"DB_USER"`
 		DBPassword string `mapstructure:"DB_PASSWORD"`
 		DBName     string `mapstructure:"DB_NAME"`
+	}
+
+	BookmarkResp struct {
+		ID          uint    `json:"id"`
+		Name        *string `json:"name,omitempty"`
+		Link        *string `json:"link,omitempty"`
+		Description *string `json:"description,omitempty"`
 	}
 )
 
@@ -119,13 +132,10 @@ func main() {
 
 	e.POST("/auth/register", func(c echo.Context) error {
 		u := UserReq{}
-		if err = c.Bind(&u); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if err := BindAndValidate(c, &u); err != nil {
+			return err
 		}
-		if err = c.Validate(&u); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-		fmt.Println(u)
+
 		token := uuid.New().String()
 		res := db.Create(&User{
 			Email: u.Email,
@@ -142,13 +152,60 @@ func main() {
 		return c.JSON(http.StatusOK, &resp)
 	})
 
-	//bookmarkG := e.Group("/bookmark")
-	//bookmarkG.GET("", func(c echo.Context) error {
-	//
-	//})
-	//bookmarkG.POST("", func(c echo.Context) error {
-	//
-	//})
+	bookmarkG := e.Group("/bookmark")
+	bookmarkG.POST("/list", func(c echo.Context) error {
+		user, err := GetUserFromContext(c)
+		if err != nil {
+			return err
+		}
+
+		bookmarks := make([]Bookmark, 0)
+		res := db.Where("user_id = ?", user.ID).Find(&bookmarks)
+		if res.Error != nil {
+			return res.Error
+		}
+
+		resp := make([]BookmarkResp, len(bookmarks))
+		for i := range bookmarks {
+			resp[i] = BookmarkResp{
+				ID:          bookmarks[i].ID,
+				Name:        bookmarks[i].Name,
+				Link:        bookmarks[i].Link,
+				Description: bookmarks[i].Description,
+			}
+		}
+		return c.JSON(http.StatusOK, resp)
+	})
+	bookmarkG.POST("", func(c echo.Context) error {
+		user, err := GetUserFromContext(c)
+		if err != nil {
+			return err
+		}
+
+		req := BookmarkReq{}
+		if err := BindAndValidate(c, &req); err != nil {
+			return err
+		}
+
+		model := Bookmark{
+			Name:        req.Name,
+			Link:        req.Link,
+			Description: req.Description,
+			UserID:      user.ID,
+		}
+
+		res := db.Create(model)
+		if res.Error != nil {
+			return res.Error
+		}
+
+		return c.JSON(http.StatusOK, BookmarkResp{
+			ID:          model.ID,
+			Name:        model.Name,
+			Link:        model.Link,
+			Description: model.Description,
+		})
+	})
 	//bookmarkG.DELETE("/:id", func(c echo.Context) error {
 	//
 	//})
@@ -189,4 +246,23 @@ func main() {
 	})
 	listen := cfg.Host + ":" + cfg.Port
 	e.Logger.Fatal(e.Start(listen))
+}
+
+func BindAndValidate(c echo.Context, v interface{}) error {
+	var err error
+	if err = c.Bind(v); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if err = c.Validate(v); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return nil
+}
+
+func GetUserFromContext(c echo.Context) (*User, error) {
+	user := c.Get("user").(*User)
+	if user == nil {
+		return nil, errors.New("no user found in context")
+	}
+	return user, nil
 }
