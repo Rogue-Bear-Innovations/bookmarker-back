@@ -1,0 +1,47 @@
+swagger: "2.0"
+info:
+  title: bookmark app
+  version: 0.0.1
+  description:
+    yes
+schemes:
+  - "http"
+paths:
+  /bookmark:
+    post:
+      tags:
+        - "Bookmark"
+      summary: "Get bookrmarks"
+      consumes:
+        - "application/json"
+      produces:
+        - "application/json"
+      parameters:
+        - in: "body"
+          name: "tags"
+          description: "Filter by tags"
+          schema:
+            type: array
+            items:
+              type: integer
+      responses:
+        "400":
+          description: "Invalid request"
+        "200":
+          description: "Success"
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/Bookmark'
+
+definitions:
+  Bookmark:
+    properties:
+      id:
+        type: integer
+      name:
+        type: string
+      link:
+        type: string
+      description:
+        type: string
