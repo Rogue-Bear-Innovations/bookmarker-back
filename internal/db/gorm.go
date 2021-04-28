@@ -15,8 +15,14 @@ import (
 )
 
 type (
+	GormForkedModel struct {
+		ID        uint `gorm:"primarykey"`
+		CreatedAt time.Time
+		UpdatedAt time.Time
+	}
+
 	User struct {
-		gorm.Model
+		GormForkedModel
 		Email     string `gorm:"unique;not null"`
 		Password  string `gorm:"not null"`
 		Token     string `gorm:"not null"`
@@ -25,7 +31,7 @@ type (
 	}
 
 	Bookmark struct {
-		gorm.Model
+		GormForkedModel
 		Name        *string
 		Link        *string
 		Description *string
@@ -35,7 +41,7 @@ type (
 	}
 
 	Tag struct {
-		gorm.Model
+		GormForkedModel
 		Name      string     `gorm:"not null;uniqueIndex:uidx_name_user_id"`
 		Bookmarks []Bookmark `gorm:"many2many:tag_bookmarks;"`
 		UserID    uint64     `gorm:"not null;uniqueIndex:uidx_name_user_id"`

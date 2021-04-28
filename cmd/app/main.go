@@ -20,7 +20,8 @@ func main() {
 				if err != nil {
 					return nil, err
 				}
-				return l.Sugar(), nil
+				s := l.Sugar()
+				return s, nil
 			},
 		),
 		fx.Invoke(func(server *transport.HTTPServer) {

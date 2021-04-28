@@ -2,15 +2,17 @@ package transport
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
+	"time"
 
 	"github.com/Masterminds/squirrel"
 	"github.com/go-playground/validator"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	fiberLogger "github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/google/uuid"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 	"github.com/pkg/errors"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -18,6 +20,8 @@ import (
 
 	"github.com/Rogue-Bear-Innovations/bookmarker-back/internal/config"
 	"github.com/Rogue-Bear-Innovations/bookmarker-back/internal/db"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 type (
@@ -52,101 +56,99 @@ type (
 		Name string `json:"name"`
 	}
 
-	CustomValidator struct {
-		validator *validator.Validate
-	}
-
 	HTTPServer struct {
-		db *gorm.DB
+		db     *gorm.DB
+		logger *zap.SugaredLogger
 	}
 )
 
 func NewHTTPServer(lc fx.Lifecycle, cfg *config.Config, db *gorm.DB, logger *zap.SugaredLogger) *HTTPServer {
-	e := echo.New()
+	app := fiber.New(fiber.Config{
+		IdleTimeout: time.Second * 30,
+		ErrorHandler: func(ctx *fiber.Ctx, err error) error {
+			logger.Errorw("request failed",
+				"error", err,
+				"path", ctx.Path(),
+				"method", ctx.Method(),
+				"request_body", string(ctx.Body()),
+				"request_headers", ctx.Request().Header.String(),
+				"request_query", string(ctx.Request().URI().QueryString()),
+			)
+			return fiber.DefaultErrorHandler(ctx, err)
+		},
+	})
 
 	instance := HTTPServer{
-		db: db,
-	}
-
-	// routes
-	e.POST("/auth/register", instance.Register)
-
-	bookmarkG := e.Group("/bookmark")
-	bookmarkG.POST("/list", instance.BookmarkGet)
-	bookmarkG.POST("", instance.BookmarkCreate)
-	bookmarkG.PATCH("/:id", instance.BookmarkUpdate)
-	bookmarkG.DELETE("/:id", instance.BookmarkUpdate)
-
-	tagG := e.Group("/tag")
-	tagG.GET("", instance.TagGet)
-	tagG.POST("", instance.TagCreate)
-	tagG.PATCH("/:id", instance.TagUpdate)
-	tagG.DELETE("/:id", instance.TagDelete)
-
-	e.GET("/ping", func(c echo.Context) error { return c.String(http.StatusOK, "pong") })
-
-	echo.NotFoundHandler = func(c echo.Context) error {
-		return c.NoContent(http.StatusNotFound)
+		db:     db,
+		logger: logger,
 	}
 
 	// middlewares
-	e.Use(middleware.CORS())
-	e.Use(middleware.Logger())
-	e.Use(middleware.Recover())
+	app.Use(cors.New())        // might add options https://github.com/gofiber/fiber/tree/master/middleware/cors
+	app.Use(fiberLogger.New()) // https://github.com/gofiber/fiber/blob/master/middleware/logger/README.md
+	app.Use(recover.New(recover.Config{
+		EnableStackTrace: true,
+	})) // https://github.com/gofiber/fiber/blob/master/middleware/recover/README.md
 
-	// custom middlewares
-	e.Use(instance.AuthMiddleware)
+	// routes
+	app.Get("/ping", func(c *fiber.Ctx) error { return c.SendString("pong") })
 
-	// validator
-	e.Validator = &CustomValidator{validator: validator.New()}
+	authG := app.Group("/auth")
+	authG.Post("/register", instance.Register)
+
+	internalG := app.Group("")
+
+	internalG.Use(instance.AuthMiddleware)
+
+	bookmarkG := internalG.Group("/bookmark")
+	bookmarkG.Post("/list", instance.BookmarkGet)
+	bookmarkG.Post("", instance.BookmarkCreate)
+	bookmarkG.Patch("/:id", instance.BookmarkUpdate)
+	bookmarkG.Delete("/:id", instance.BookmarkDelete)
+
+	tagG := internalG.Group("/tag")
+	tagG.Get("", instance.TagGet)
+	tagG.Post("", instance.TagCreate)
+	tagG.Patch("/:id", instance.TagUpdate)
+	tagG.Delete("/:id", instance.TagDelete)
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			go func() {
 				listen := cfg.Host + ":" + cfg.Port
-				if err := e.Start(listen); err != nil && err != http.ErrServerClosed {
-					e.Logger.Fatal("shutting down the server")
+				if err := app.Listen(listen); err != nil {
+					logger.Fatalw("server stopped", "error", err)
 				}
 			}()
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {
 			logger.Info("Stopping HTTP server.")
-			return e.Shutdown(ctx)
+			return app.Shutdown()
 		},
 	})
 
 	return &instance
 }
 
-func (s *HTTPServer) AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
-		if c.Path() == "/auth/register" || c.Path() == "/ping" {
-			return next(c)
-		}
-		token := ""
-		for key, values := range c.Request().Header {
-			if strings.ToLower(key) == "x-token" {
-				token = values[0]
-				break
-			}
-		}
-		if token == "" {
-			return c.NoContent(http.StatusUnauthorized)
-		}
-		user := db.User{}
-		res := s.db.Where("token = ?", token).First(&user)
-		if res.Error != nil {
-			c.Logger().Error(errors.Wrap(res.Error, "find user in db"))
-			return c.NoContent(http.StatusUnauthorized)
-		}
-
-		c.Set("user", &user)
-		return next(c)
+func (s *HTTPServer) AuthMiddleware(c *fiber.Ctx) error {
+	fmt.Println("running middleware")
+	token := c.Get("x-token")
+	if token == "" {
+		return c.SendStatus(http.StatusUnauthorized)
 	}
+
+	user := db.User{}
+	res := s.db.Where("token = ?", token).First(&user)
+	if res.Error != nil {
+		return c.SendStatus(http.StatusUnauthorized)
+	}
+
+	c.Locals("user", &user)
+	return c.Next()
 }
 
-func (s *HTTPServer) Register(c echo.Context) error {
+func (s *HTTPServer) Register(c *fiber.Ctx) error {
 	u := UserReq{}
 	if err := BindAndValidate(c, &u); err != nil {
 		return err
@@ -165,10 +167,10 @@ func (s *HTTPServer) Register(c echo.Context) error {
 	}{
 		Token: token,
 	}
-	return c.JSON(http.StatusOK, &resp)
+	return c.JSON(&resp)
 }
 
-func (s *HTTPServer) BookmarkGet(c echo.Context) error {
+func (s *HTTPServer) BookmarkGet(c *fiber.Ctx) error {
 	user, err := GetUserFromContext(c)
 	if err != nil {
 		return err
@@ -210,10 +212,10 @@ func (s *HTTPServer) BookmarkGet(c echo.Context) error {
 			Description: bookmarks[i].Description,
 		}
 	}
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(resp)
 }
 
-func (s *HTTPServer) BookmarkCreate(c echo.Context) error {
+func (s *HTTPServer) BookmarkCreate(c *fiber.Ctx) error {
 	user, err := GetUserFromContext(c)
 	if err != nil {
 		return err
@@ -227,7 +229,7 @@ func (s *HTTPServer) BookmarkCreate(c echo.Context) error {
 	newTags := make([]db.Tag, len(req.Tags))
 	for i := range req.Tags {
 		newTags[i] = db.Tag{
-			Model: gorm.Model{
+			GormForkedModel: db.GormForkedModel{
 				ID: uint(req.Tags[i]),
 			},
 		}
@@ -246,7 +248,7 @@ func (s *HTTPServer) BookmarkCreate(c echo.Context) error {
 		return res.Error
 	}
 
-	return c.JSON(http.StatusOK, BookmarkResp{
+	return c.JSON(BookmarkResp{
 		ID:          model.ID,
 		Name:        model.Name,
 		Link:        model.Link,
@@ -254,7 +256,7 @@ func (s *HTTPServer) BookmarkCreate(c echo.Context) error {
 	})
 }
 
-func (s *HTTPServer) BookmarkUpdate(c echo.Context) error {
+func (s *HTTPServer) BookmarkUpdate(c *fiber.Ctx) error {
 	id, err := GetAndParseParam(c, "id")
 	if err != nil {
 		return err
@@ -272,14 +274,14 @@ func (s *HTTPServer) BookmarkUpdate(c echo.Context) error {
 	newTags := make([]db.Tag, len(req.Tags))
 	for i := range req.Tags {
 		newTags[i] = db.Tag{
-			Model: gorm.Model{
+			GormForkedModel: db.GormForkedModel{
 				ID: uint(req.Tags[i]),
 			},
 		}
 	}
 
 	model := db.Bookmark{
-		Model: gorm.Model{
+		GormForkedModel: db.GormForkedModel{
 			ID: uint(id),
 		},
 		Name:        req.Name,
@@ -294,7 +296,7 @@ func (s *HTTPServer) BookmarkUpdate(c echo.Context) error {
 		return res.Error
 	}
 
-	return c.JSON(http.StatusOK, BookmarkResp{
+	return c.JSON(BookmarkResp{
 		ID:          model.ID,
 		Name:        model.Name,
 		Link:        model.Link,
@@ -302,19 +304,19 @@ func (s *HTTPServer) BookmarkUpdate(c echo.Context) error {
 	})
 }
 
-func (s *HTTPServer) BookmarkDelete(c echo.Context) error {
-	id := c.Param("id")
+func (s *HTTPServer) BookmarkDelete(c *fiber.Ctx) error {
+	id := c.Params("id")
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid path param 'id'")
+		return c.Status(http.StatusBadRequest).SendString("invalid path param 'id'")
 	}
 	res := s.db.Delete(&db.Bookmark{}, id)
 	if res.Error != nil {
 		return res.Error
 	}
-	return c.NoContent(http.StatusNoContent)
+	return c.SendStatus(http.StatusNoContent)
 }
 
-func (s *HTTPServer) TagGet(c echo.Context) error {
+func (s *HTTPServer) TagGet(c *fiber.Ctx) error {
 	user, err := GetUserFromContext(c)
 	if err != nil {
 		return err
@@ -333,10 +335,10 @@ func (s *HTTPServer) TagGet(c echo.Context) error {
 			Name: tags[i].Name,
 		}
 	}
-	return c.JSON(http.StatusOK, resp)
+	return c.JSON(resp)
 }
 
-func (s *HTTPServer) TagCreate(c echo.Context) error {
+func (s *HTTPServer) TagCreate(c *fiber.Ctx) error {
 	user, err := GetUserFromContext(c)
 	if err != nil {
 		return err
@@ -357,13 +359,13 @@ func (s *HTTPServer) TagCreate(c echo.Context) error {
 		return res.Error
 	}
 
-	return c.JSON(http.StatusOK, TagResp{
+	return c.JSON(TagResp{
 		ID:   model.ID,
 		Name: model.Name,
 	})
 }
 
-func (s *HTTPServer) TagUpdate(c echo.Context) error {
+func (s *HTTPServer) TagUpdate(c *fiber.Ctx) error {
 	id, err := GetAndParseParam(c, "id")
 	if err != nil {
 		return err
@@ -379,7 +381,7 @@ func (s *HTTPServer) TagUpdate(c echo.Context) error {
 	}
 
 	model := db.Tag{
-		Model: gorm.Model{
+		GormForkedModel: db.GormForkedModel{
 			ID: uint(id),
 		},
 		Name:   req.Name,
@@ -391,61 +393,84 @@ func (s *HTTPServer) TagUpdate(c echo.Context) error {
 		return res.Error
 	}
 
-	return c.JSON(http.StatusOK, TagResp{
+	return c.JSON(TagResp{
 		ID:   model.ID,
 		Name: model.Name,
 	})
 }
 
-func (s *HTTPServer) TagDelete(c echo.Context) error {
-	id := c.Param("id")
+func (s *HTTPServer) TagDelete(c *fiber.Ctx) error {
+	id := c.Params("id")
 	if id == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid path param 'id'")
+		return c.Status(http.StatusBadRequest).SendString("invalid path param 'id'")
 	}
 	res := s.db.Delete(&db.Tag{}, id)
 	if res.Error != nil {
 		return res.Error
 	}
-	return c.NoContent(http.StatusNoContent)
+	return c.SendStatus(http.StatusNoContent)
 }
 
 ////////
 
-func (cv *CustomValidator) Validate(i interface{}) error {
-	if err := cv.validator.Struct(i); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+type ErrorResponse struct {
+	FailedField string
+	Tag         string
+	Value       string
+}
+
+func ValidateStruct(v interface{}) []*ErrorResponse {
+	var errs []*ErrorResponse
+	validate := validator.New()
+	err := validate.Struct(v)
+	if err != nil {
+		for _, err := range err.(validator.ValidationErrors) {
+			var element ErrorResponse
+			element.FailedField = err.StructNamespace()
+			element.Tag = err.Tag()
+			element.Value = err.Param()
+			errs = append(errs, &element)
+		}
 	}
+	return errs
+}
+
+func BindAndValidate(c *fiber.Ctx, v interface{}) error {
+	if err := c.BodyParser(v); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	errs := ValidateStruct(v)
+	if errs != nil {
+		return c.JSON(errs)
+	}
+
 	return nil
 }
 
-func BindAndValidate(c echo.Context, v interface{}) error {
-	var err error
-	if err = c.Bind(v); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	if err = c.Validate(v); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	return nil
-}
-
-func GetUserFromContext(c echo.Context) (*db.User, error) {
-	user := c.Get("user").(*db.User)
-	if user == nil {
+func GetUserFromContext(c *fiber.Ctx) (*db.User, error) {
+	userRaw := c.Locals("user")
+	if userRaw == nil {
 		return nil, errors.New("no user found in context")
+	}
+	user, ok := userRaw.(*db.User)
+	if !ok {
+		return nil, errors.New("user context value conversion failed")
 	}
 	return user, nil
 }
 
-func GetParam(c echo.Context, name string) (string, error) {
-	value := c.Param(name)
+func GetParam(c *fiber.Ctx, name string) (string, error) {
+	value := c.Params(name)
 	if value == "" {
-		return "", echo.NewHTTPError(http.StatusBadRequest, "invalid path param 'id'")
+		return "", c.Status(http.StatusBadRequest).SendString("invalid path param 'id'")
 	}
 	return value, nil
 }
 
-func GetAndParseParam(c echo.Context, name string) (uint64, error) {
+func GetAndParseParam(c *fiber.Ctx, name string) (uint64, error) {
 	v, e := GetParam(c, name)
 	if e != nil {
 		return 0, e
