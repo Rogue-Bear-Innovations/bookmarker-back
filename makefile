@@ -16,3 +16,6 @@ deploy-heroku:
 	docker tag bookmarker:latest registry.heroku.com/the-ultimate-bookmarker-app/web
 	docker push registry.heroku.com/the-ultimate-bookmarker-app/web
 	heroku container:release web -a the-ultimate-bookmarker-app
+
+heroku-logs:
+	heroku logs --tail -a the-ultimate-bookmarker-app

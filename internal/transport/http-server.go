@@ -68,6 +68,7 @@ func NewHTTPServer(lc fx.Lifecycle, cfg *config.Config, db *gorm.DB, logger *zap
 		db: db,
 	}
 
+	// routes
 	e.POST("/auth/register", instance.Register)
 
 	bookmarkG := e.Group("/bookmark")
@@ -84,17 +85,20 @@ func NewHTTPServer(lc fx.Lifecycle, cfg *config.Config, db *gorm.DB, logger *zap
 
 	e.GET("/ping", func(c echo.Context) error { return c.String(http.StatusOK, "pong") })
 
+	echo.NotFoundHandler = func(c echo.Context) error {
+		return c.NoContent(http.StatusNotFound)
+	}
+
+	// middlewares
 	e.Use(middleware.CORS())
 	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 
+	// custom middlewares
 	e.Use(instance.AuthMiddleware)
 
+	// validator
 	e.Validator = &CustomValidator{validator: validator.New()}
-
-	echo.NotFoundHandler = func(c echo.Context) error {
-		return c.NoContent(http.StatusNotFound)
-	}
 
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -113,6 +117,33 @@ func NewHTTPServer(lc fx.Lifecycle, cfg *config.Config, db *gorm.DB, logger *zap
 	})
 
 	return &instance
+}
+
+func (s *HTTPServer) AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if c.Path() == "/auth/register" || c.Path() == "/ping" {
+			return next(c)
+		}
+		token := ""
+		for key, values := range c.Request().Header {
+			if strings.ToLower(key) == "x-token" {
+				token = values[0]
+				break
+			}
+		}
+		if token == "" {
+			return c.NoContent(http.StatusUnauthorized)
+		}
+		user := db.User{}
+		res := s.db.Where("token = ?", token).First(&user)
+		if res.Error != nil {
+			c.Logger().Error(errors.Wrap(res.Error, "find user in db"))
+			return c.NoContent(http.StatusUnauthorized)
+		}
+
+		c.Set("user", &user)
+		return next(c)
+	}
 }
 
 func (s *HTTPServer) Register(c echo.Context) error {
@@ -376,33 +407,6 @@ func (s *HTTPServer) TagDelete(c echo.Context) error {
 		return res.Error
 	}
 	return c.NoContent(http.StatusNoContent)
-}
-
-func (s *HTTPServer) AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
-		if c.Path() == "/auth/register" || c.Path() == "/ping" {
-			return next(c)
-		}
-		token := ""
-		for key, values := range c.Request().Header {
-			if strings.ToLower(key) == "x-token" {
-				token = values[0]
-				break
-			}
-		}
-		if token == "" {
-			return c.NoContent(http.StatusUnauthorized)
-		}
-		user := db.User{}
-		res := s.db.Where("token = ?", token).First(&user)
-		if res.Error != nil {
-			c.Logger().Error(errors.Wrap(res.Error, "find user in db"))
-			return c.NoContent(http.StatusUnauthorized)
-		}
-
-		c.Set("user", &user)
-		return next(c)
-	}
 }
 
 ////////

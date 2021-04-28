@@ -11,7 +11,7 @@ paths:
     post:
       tags:
         - "Bookmark"
-      summary: "Get bookrmarks"
+      summary: "Get bookmarks"
       consumes:
         - "application/json"
       produces:
@@ -27,6 +27,8 @@ paths:
       responses:
         "400":
           description: "Invalid request"
+        "401":
+          description: "Unauthorized"
         "200":
           description: "Success"
           schema:
