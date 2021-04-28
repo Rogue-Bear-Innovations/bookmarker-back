@@ -6,13 +6,13 @@ services:
       context: .
       dockerfile: ./Dockerfile
     environment:
-      - BOOKMARKER_HOST=0.0.0.0
-      - BOOKMARKER_PORT=1323
-      - BOOKMARKER_DB_USER=app
-      - BOOKMARKER_DB_PASSWORD=password
-      - BOOKMARKER_DB_HOST=db
-      - BOOKMARKER_DB_PORT=5432
-      - BOOKMARKER_DB_NAME=app
+      - HOST=0.0.0.0
+      - PORT=1323
+      - DB_USER=app
+      - DB_PASSWORD=password
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=app
     expose:
       - 1323
     ports:

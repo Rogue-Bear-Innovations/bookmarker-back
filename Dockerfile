@@ -10,7 +10,5 @@ RUN go mod tidy
 
 RUN go build -v -o ./bookmark ./cmd/app/main.go
 
-EXPOSE 1323
-
 # Run the executable
 CMD ["./bookmark"]

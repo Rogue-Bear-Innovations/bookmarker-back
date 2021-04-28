@@ -26,7 +26,7 @@ type (
 )
 
 func NewConfig() (*Config, error) {
-	viper.SetEnvPrefix("BOOKMARKER")
+	viper.SetEnvPrefix("")
 
 	viper.SetDefault("HOST", "0.0.0.0")
 	viper.SetDefault("PORT", "1323")

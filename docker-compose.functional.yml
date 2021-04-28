@@ -6,15 +6,15 @@ services:
       context: .
       dockerfile: ./Dockerfile
     environment:
-      - BOOKMARKER_HOST=0.0.0.0
-      - BOOKMARKER_PORT=1323
-      - BOOKMARKER_DB_USER=app
-      - BOOKMARKER_DB_PASSWORD=password
-      - BOOKMARKER_DB_HOST=db
-      - BOOKMARKER_DB_PORT=5432
-      - BOOKMARKER_DB_NAME=app
+      - HOST=0.0.0.0
+      - PORT=1324
+      - DB_USER=app
+      - DB_PASSWORD=password
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=app
     expose:
-      - 1323
+      - 1324
     depends_on:
       db:
         condition: service_healthy
@@ -25,7 +25,7 @@ services:
       dockerfile: ./Dockerfile.func
     environment:
       - TEST_RUNNER_HOST=app
-      - TEST_RUNNER_PORT=1323
+      - TEST_RUNNER_PORT=1324
       - TEST_RUNNER_DB_USER=app
       - TEST_RUNNER_DB_PASSWORD=password
       - TEST_RUNNER_DB_HOST=db
