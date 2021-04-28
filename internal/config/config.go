@@ -1,7 +1,15 @@
 package config
 
 import (
+	"fmt"
+
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
+)
+
+const (
+	sslModeDisable = "disable"
+	sslModeRequire = "require"
 )
 
 type (
@@ -13,6 +21,7 @@ type (
 		DBUser     string `mapstructure:"DB_USER"`
 		DBPassword string `mapstructure:"DB_PASSWORD"`
 		DBName     string `mapstructure:"DB_NAME"`
+		DBSSLMode  string `mapstructure:"DB_SSL_MODE"`
 	}
 )
 
@@ -26,8 +35,9 @@ func NewConfig() (*Config, error) {
 	viper.SetDefault("DB_USER", "user")
 	viper.SetDefault("DB_PASSWORD", "password")
 	viper.SetDefault("DB_NAME", "db")
+	viper.SetDefault("DB_SSL_MODE", sslModeDisable)
 
-	envs := []string{"HOST", "PORT", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME"}
+	envs := []string{"HOST", "PORT", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_SSL_MODE"}
 	for _, key := range envs {
 		if err := viper.BindEnv(key); err != nil {
 			return nil, err
@@ -39,5 +49,19 @@ func NewConfig() (*Config, error) {
 		return nil, err
 	}
 
+	if err := validate(&cfg); err != nil {
+		return nil, errors.Wrap(err, "config validation failed")
+	}
+
 	return &cfg, nil
+}
+
+func validate(cfg *Config) error {
+	validSSLValues := []string{sslModeDisable, sslModeRequire}
+	for _, validValue := range validSSLValues {
+		if cfg.DBSSLMode == validValue {
+			return nil
+		}
+	}
+	return errors.New(fmt.Sprintf("DB SSL mode is invalid: %s", cfg.DBSSLMode))
 }

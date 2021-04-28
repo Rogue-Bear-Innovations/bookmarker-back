@@ -12,7 +12,35 @@ import (
 	"gorm.io/gorm/logger"
 
 	"github.com/Rogue-Bear-Innovations/bookmarker-back/internal/config"
-	"github.com/Rogue-Bear-Innovations/bookmarker-back/internal/models"
+)
+
+type (
+	User struct {
+		gorm.Model
+		Email     string `gorm:"unique;not null"`
+		Password  string `gorm:"not null"`
+		Token     string `gorm:"not null"`
+		Bookmarks []Bookmark
+		Tags      []Tag
+	}
+
+	Bookmark struct {
+		gorm.Model
+		Name        *string
+		Link        *string
+		Description *string
+		UserID      uint `gorm:"not null"`
+		User        User
+		Tags        []Tag `gorm:"many2many:tag_bookmarks;"`
+	}
+
+	Tag struct {
+		gorm.Model
+		Name      string     `gorm:"not null;uniqueIndex:uidx_name_user_id"`
+		Bookmarks []Bookmark `gorm:"many2many:tag_bookmarks;"`
+		UserID    uint64     `gorm:"not null;uniqueIndex:uidx_name_user_id"`
+		User      User
+	}
 )
 
 func NewGormClient(cfg *config.Config) (*gorm.DB, error) {
@@ -23,7 +51,7 @@ func NewGormClient(cfg *config.Config) (*gorm.DB, error) {
 		IgnoreRecordNotFoundError: false,
 	})
 
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=require",
 		cfg.DBHost, cfg.DBUser, cfg.DBPassword, cfg.DBName, cfg.DBPort)
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
 		Logger: newLogger,
@@ -32,13 +60,13 @@ func NewGormClient(cfg *config.Config) (*gorm.DB, error) {
 		return nil, errors.Wrap(err, "failed to connect database")
 	}
 
-	if err := db.AutoMigrate(&models.User{}); err != nil {
+	if err := db.AutoMigrate(&User{}); err != nil {
 		return nil, errors.Wrap(err, "migrate user")
 	}
-	if err := db.AutoMigrate(&models.Bookmark{}); err != nil {
+	if err := db.AutoMigrate(&Bookmark{}); err != nil {
 		return nil, errors.Wrap(err, "migrate bookmark")
 	}
-	if err := db.AutoMigrate(&models.Tag{}); err != nil {
+	if err := db.AutoMigrate(&Tag{}); err != nil {
 		return nil, errors.Wrap(err, "migrate tag")
 	}
 

@@ -17,10 +17,41 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Rogue-Bear-Innovations/bookmarker-back/internal/config"
-	"github.com/Rogue-Bear-Innovations/bookmarker-back/internal/models"
+	"github.com/Rogue-Bear-Innovations/bookmarker-back/internal/db"
 )
 
 type (
+	UserReq struct {
+		Email string `json:"email" validate:"required,email"`
+	}
+
+	BookmarkReq struct {
+		Name        *string  `json:"name"`
+		Description *string  `json:"description"`
+		Link        *string  `json:"link"`
+		Tags        []uint64 `json:"tags"`
+	}
+
+	BookmarkReqList struct {
+		Tags []uint64 `json:"tags"`
+	}
+
+	BookmarkResp struct {
+		ID          uint    `json:"id"`
+		Name        *string `json:"name,omitempty"`
+		Link        *string `json:"link,omitempty"`
+		Description *string `json:"description,omitempty"`
+	}
+
+	TagReq struct {
+		Name string `json:"name" validate:"required"`
+	}
+
+	TagResp struct {
+		ID   uint   `json:"id"`
+		Name string `json:"name"`
+	}
+
 	CustomValidator struct {
 		validator *validator.Validate
 	}
@@ -85,13 +116,13 @@ func NewHTTPServer(lc fx.Lifecycle, cfg *config.Config, db *gorm.DB, logger *zap
 }
 
 func (s *HTTPServer) Register(c echo.Context) error {
-	u := models.UserReq{}
+	u := UserReq{}
 	if err := BindAndValidate(c, &u); err != nil {
 		return err
 	}
 
 	token := uuid.New().String()
-	res := s.db.Create(&models.User{
+	res := s.db.Create(&db.User{
 		Email: u.Email,
 		Token: token,
 	})
@@ -112,7 +143,7 @@ func (s *HTTPServer) BookmarkGet(c echo.Context) error {
 		return err
 	}
 
-	req := models.BookmarkReqList{}
+	req := BookmarkReqList{}
 	if err := BindAndValidate(c, &req); err != nil {
 		return err
 	}
@@ -133,15 +164,15 @@ func (s *HTTPServer) BookmarkGet(c echo.Context) error {
 		return err
 	}
 
-	bookmarks := make([]models.Bookmark, 0)
+	bookmarks := make([]db.Bookmark, 0)
 	res := s.db.Raw(sql, args...).Scan(&bookmarks)
 	if res.Error != nil {
 		return res.Error
 	}
 
-	resp := make([]models.BookmarkResp, len(bookmarks))
+	resp := make([]BookmarkResp, len(bookmarks))
 	for i := range bookmarks {
-		resp[i] = models.BookmarkResp{
+		resp[i] = BookmarkResp{
 			ID:          bookmarks[i].ID,
 			Name:        bookmarks[i].Name,
 			Link:        bookmarks[i].Link,
@@ -157,21 +188,21 @@ func (s *HTTPServer) BookmarkCreate(c echo.Context) error {
 		return err
 	}
 
-	req := models.BookmarkReq{}
+	req := BookmarkReq{}
 	if err := BindAndValidate(c, &req); err != nil {
 		return err
 	}
 
-	newTags := make([]models.Tag, len(req.Tags))
+	newTags := make([]db.Tag, len(req.Tags))
 	for i := range req.Tags {
-		newTags[i] = models.Tag{
+		newTags[i] = db.Tag{
 			Model: gorm.Model{
 				ID: uint(req.Tags[i]),
 			},
 		}
 	}
 
-	model := models.Bookmark{
+	model := db.Bookmark{
 		Name:        req.Name,
 		Link:        req.Link,
 		Description: req.Description,
@@ -184,7 +215,7 @@ func (s *HTTPServer) BookmarkCreate(c echo.Context) error {
 		return res.Error
 	}
 
-	return c.JSON(http.StatusOK, models.BookmarkResp{
+	return c.JSON(http.StatusOK, BookmarkResp{
 		ID:          model.ID,
 		Name:        model.Name,
 		Link:        model.Link,
@@ -202,21 +233,21 @@ func (s *HTTPServer) BookmarkUpdate(c echo.Context) error {
 		return err
 	}
 
-	req := models.BookmarkReq{}
+	req := BookmarkReq{}
 	if err := BindAndValidate(c, &req); err != nil {
 		return err
 	}
 
-	newTags := make([]models.Tag, len(req.Tags))
+	newTags := make([]db.Tag, len(req.Tags))
 	for i := range req.Tags {
-		newTags[i] = models.Tag{
+		newTags[i] = db.Tag{
 			Model: gorm.Model{
 				ID: uint(req.Tags[i]),
 			},
 		}
 	}
 
-	model := models.Bookmark{
+	model := db.Bookmark{
 		Model: gorm.Model{
 			ID: uint(id),
 		},
@@ -232,7 +263,7 @@ func (s *HTTPServer) BookmarkUpdate(c echo.Context) error {
 		return res.Error
 	}
 
-	return c.JSON(http.StatusOK, models.BookmarkResp{
+	return c.JSON(http.StatusOK, BookmarkResp{
 		ID:          model.ID,
 		Name:        model.Name,
 		Link:        model.Link,
@@ -245,7 +276,7 @@ func (s *HTTPServer) BookmarkDelete(c echo.Context) error {
 	if id == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid path param 'id'")
 	}
-	res := s.db.Delete(&models.Bookmark{}, id)
+	res := s.db.Delete(&db.Bookmark{}, id)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -258,15 +289,15 @@ func (s *HTTPServer) TagGet(c echo.Context) error {
 		return err
 	}
 
-	tags := make([]models.Tag, 0)
+	tags := make([]db.Tag, 0)
 	res := s.db.Where("user_id = ?", user.ID).Find(&tags)
 	if res.Error != nil {
 		return res.Error
 	}
 
-	resp := make([]models.TagResp, len(tags))
+	resp := make([]TagResp, len(tags))
 	for i := range tags {
-		resp[i] = models.TagResp{
+		resp[i] = TagResp{
 			ID:   tags[i].ID,
 			Name: tags[i].Name,
 		}
@@ -280,12 +311,12 @@ func (s *HTTPServer) TagCreate(c echo.Context) error {
 		return err
 	}
 
-	req := models.TagReq{}
+	req := TagReq{}
 	if err := BindAndValidate(c, &req); err != nil {
 		return err
 	}
 
-	model := models.Tag{
+	model := db.Tag{
 		Name:   req.Name,
 		UserID: uint64(user.ID),
 	}
@@ -295,7 +326,7 @@ func (s *HTTPServer) TagCreate(c echo.Context) error {
 		return res.Error
 	}
 
-	return c.JSON(http.StatusOK, models.TagResp{
+	return c.JSON(http.StatusOK, TagResp{
 		ID:   model.ID,
 		Name: model.Name,
 	})
@@ -311,12 +342,12 @@ func (s *HTTPServer) TagUpdate(c echo.Context) error {
 		return err
 	}
 
-	req := models.TagReq{}
+	req := TagReq{}
 	if err := BindAndValidate(c, &req); err != nil {
 		return err
 	}
 
-	model := models.Tag{
+	model := db.Tag{
 		Model: gorm.Model{
 			ID: uint(id),
 		},
@@ -329,7 +360,7 @@ func (s *HTTPServer) TagUpdate(c echo.Context) error {
 		return res.Error
 	}
 
-	return c.JSON(http.StatusOK, models.TagResp{
+	return c.JSON(http.StatusOK, TagResp{
 		ID:   model.ID,
 		Name: model.Name,
 	})
@@ -340,7 +371,7 @@ func (s *HTTPServer) TagDelete(c echo.Context) error {
 	if id == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid path param 'id'")
 	}
-	res := s.db.Delete(&models.Tag{}, id)
+	res := s.db.Delete(&db.Tag{}, id)
 	if res.Error != nil {
 		return res.Error
 	}
@@ -362,7 +393,7 @@ func (s *HTTPServer) AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 		if token == "" {
 			return c.NoContent(http.StatusUnauthorized)
 		}
-		user := models.User{}
+		user := db.User{}
 		res := s.db.Where("token = ?", token).First(&user)
 		if res.Error != nil {
 			c.Logger().Error(errors.Wrap(res.Error, "find user in db"))
@@ -394,8 +425,8 @@ func BindAndValidate(c echo.Context, v interface{}) error {
 	return nil
 }
 
-func GetUserFromContext(c echo.Context) (*models.User, error) {
-	user := c.Get("user").(*models.User)
+func GetUserFromContext(c echo.Context) (*db.User, error) {
+	user := c.Get("user").(*db.User)
 	if user == nil {
 		return nil, errors.New("no user found in context")
 	}
