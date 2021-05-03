@@ -10,7 +10,6 @@ require (
 	github.com/gofiber/fiber/v2 v2.8.0
 	github.com/google/uuid v1.2.0
 	github.com/jackc/pgx/v4 v4.10.1
-	github.com/labstack/echo/v4 v4.2.2
 	github.com/leodido/go-urn v1.2.1 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/viper v1.7.1

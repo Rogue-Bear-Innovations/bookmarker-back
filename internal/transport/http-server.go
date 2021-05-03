@@ -25,8 +25,14 @@ import (
 )
 
 type (
-	UserReq struct {
-		Email string `json:"email" validate:"required,email"`
+	RegisterReq struct {
+		Email    string `json:"email" validate:"required,email"`
+		Password string `json:"password" validate:"required,min=12"`
+	}
+
+	LoginReq struct {
+		Email    string `json:"email" validate:"required,email"`
+		Password string `json:"password" validate:"required"`
 	}
 
 	BookmarkReq struct {
@@ -95,6 +101,7 @@ func NewHTTPServer(lc fx.Lifecycle, cfg *config.Config, db *gorm.DB, logger *zap
 
 	authG := app.Group("/auth")
 	authG.Post("/register", instance.Register)
+	authG.Post("/login", instance.Login)
 
 	internalG := app.Group("")
 
@@ -149,15 +156,16 @@ func (s *HTTPServer) AuthMiddleware(c *fiber.Ctx) error {
 }
 
 func (s *HTTPServer) Register(c *fiber.Ctx) error {
-	u := UserReq{}
-	if err := BindAndValidate(c, &u); err != nil {
-		return err
+	req := RegisterReq{}
+	if ok := BindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	token := uuid.New().String()
 	res := s.db.Create(&db.User{
-		Email: u.Email,
-		Token: token,
+		Email:    req.Email,
+		Password: req.Password,
+		Token:    token,
 	})
 	if res.Error != nil {
 		return res.Error
@@ -170,6 +178,28 @@ func (s *HTTPServer) Register(c *fiber.Ctx) error {
 	return c.JSON(&resp)
 }
 
+func (s *HTTPServer) Login(c *fiber.Ctx) error {
+	req := LoginReq{}
+	if ok := BindAndValidate(c, &req); !ok {
+		return nil
+	}
+
+	user := db.User{}
+	res := s.db.Where("email = ? AND password = ?", req.Email, req.Password).First(&user)
+	if res.Error != nil {
+		if res.Error == gorm.ErrRecordNotFound {
+			return c.SendStatus(http.StatusUnauthorized)
+		}
+		return res.Error
+	}
+	resp := struct {
+		Token string `json:"token"`
+	}{
+		Token: user.Token,
+	}
+	return c.JSON(&resp)
+}
+
 func (s *HTTPServer) BookmarkGet(c *fiber.Ctx) error {
 	user, err := GetUserFromContext(c)
 	if err != nil {
@@ -177,8 +207,8 @@ func (s *HTTPServer) BookmarkGet(c *fiber.Ctx) error {
 	}
 
 	req := BookmarkReqList{}
-	if err := BindAndValidate(c, &req); err != nil {
-		return err
+	if ok := BindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	w := squirrel.Eq{
@@ -222,8 +252,8 @@ func (s *HTTPServer) BookmarkCreate(c *fiber.Ctx) error {
 	}
 
 	req := BookmarkReq{}
-	if err := BindAndValidate(c, &req); err != nil {
-		return err
+	if ok := BindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	newTags := make([]db.Tag, len(req.Tags))
@@ -267,8 +297,8 @@ func (s *HTTPServer) BookmarkUpdate(c *fiber.Ctx) error {
 	}
 
 	req := BookmarkReq{}
-	if err := BindAndValidate(c, &req); err != nil {
-		return err
+	if ok := BindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	newTags := make([]db.Tag, len(req.Tags))
@@ -345,8 +375,8 @@ func (s *HTTPServer) TagCreate(c *fiber.Ctx) error {
 	}
 
 	req := TagReq{}
-	if err := BindAndValidate(c, &req); err != nil {
-		return err
+	if ok := BindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	model := db.Tag{
@@ -376,8 +406,8 @@ func (s *HTTPServer) TagUpdate(c *fiber.Ctx) error {
 	}
 
 	req := TagReq{}
-	if err := BindAndValidate(c, &req); err != nil {
-		return err
+	if ok := BindAndValidate(c, &req); !ok {
+		return nil
 	}
 
 	model := db.Tag{
@@ -435,19 +465,21 @@ func ValidateStruct(v interface{}) []*ErrorResponse {
 	return errs
 }
 
-func BindAndValidate(c *fiber.Ctx, v interface{}) error {
+func BindAndValidate(c *fiber.Ctx, v interface{}) bool {
 	if err := c.BodyParser(v); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+		c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"message": err.Error(),
 		})
+		return false
 	}
 
 	errs := ValidateStruct(v)
-	if errs != nil {
-		return c.JSON(errs)
+	if len(errs) > 0 {
+		c.JSON(errs)
+		return false
 	}
 
-	return nil
+	return true
 }
 
 func GetUserFromContext(c *fiber.Ctx) (*db.User, error) {
