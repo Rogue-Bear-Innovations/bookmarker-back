@@ -16,7 +16,7 @@ import (
 
 type (
 	GormForkedModel struct {
-		ID        uint `gorm:"primarykey"`
+		ID        uint64 `gorm:"primarykey"`
 		CreatedAt time.Time
 		UpdatedAt time.Time
 	}
@@ -35,7 +35,7 @@ type (
 		Name        *string
 		Link        *string
 		Description *string
-		UserID      uint `gorm:"not null"`
+		UserID      uint64 `gorm:"not null"`
 		User        User
 		Tags        []Tag `gorm:"many2many:tag_bookmarks;"`
 	}

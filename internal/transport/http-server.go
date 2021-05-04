@@ -47,7 +47,7 @@ type (
 	}
 
 	BookmarkResp struct {
-		ID          uint    `json:"id"`
+		ID          uint64  `json:"id"`
 		Name        *string `json:"name,omitempty"`
 		Link        *string `json:"link,omitempty"`
 		Description *string `json:"description,omitempty"`
@@ -58,7 +58,7 @@ type (
 	}
 
 	TagResp struct {
-		ID   uint   `json:"id"`
+		ID   uint64 `json:"id"`
 		Name string `json:"name"`
 	}
 
@@ -260,7 +260,7 @@ func (s *HTTPServer) BookmarkCreate(c *fiber.Ctx) error {
 	for i := range req.Tags {
 		newTags[i] = db.Tag{
 			GormForkedModel: db.GormForkedModel{
-				ID: uint(req.Tags[i]),
+				ID: req.Tags[i],
 			},
 		}
 	}
@@ -305,14 +305,14 @@ func (s *HTTPServer) BookmarkUpdate(c *fiber.Ctx) error {
 	for i := range req.Tags {
 		newTags[i] = db.Tag{
 			GormForkedModel: db.GormForkedModel{
-				ID: uint(req.Tags[i]),
+				ID: req.Tags[i],
 			},
 		}
 	}
 
 	model := db.Bookmark{
 		GormForkedModel: db.GormForkedModel{
-			ID: uint(id),
+			ID: id,
 		},
 		Name:        req.Name,
 		Link:        req.Link,
@@ -412,7 +412,7 @@ func (s *HTTPServer) TagUpdate(c *fiber.Ctx) error {
 
 	model := db.Tag{
 		GormForkedModel: db.GormForkedModel{
-			ID: uint(id),
+			ID: id,
 		},
 		Name:   req.Name,
 		UserID: uint64(user.ID),
