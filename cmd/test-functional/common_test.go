@@ -30,7 +30,7 @@ func TestRegister(t *testing.T) {
 			SetContext(ctx).
 			SetResult(&Resp{}).
 			SetBody(`
-			{"email": "test@gmail.com"}
+			{"email": "test@gmail.com", "password": "111111111111"}
 		`).
 			Post(u.String())
 		assert.Nil(t, err)

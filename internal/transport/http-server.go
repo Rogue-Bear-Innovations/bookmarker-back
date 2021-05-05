@@ -3,7 +3,6 @@ package transport
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strconv"
 	"time"
 
@@ -142,13 +141,13 @@ func (s *HTTPServer) AuthMiddleware(c *fiber.Ctx) error {
 	fmt.Println("running middleware")
 	token := c.Get("x-token")
 	if token == "" {
-		return c.SendStatus(http.StatusUnauthorized)
+		return c.SendStatus(fiber.StatusUnauthorized)
 	}
 
 	user := db.User{}
 	res := s.db.Where("token = ?", token).First(&user)
 	if res.Error != nil {
-		return c.SendStatus(http.StatusUnauthorized)
+		return c.SendStatus(fiber.StatusUnauthorized)
 	}
 
 	c.Locals("user", &user)
@@ -188,7 +187,7 @@ func (s *HTTPServer) Login(c *fiber.Ctx) error {
 	res := s.db.Where("email = ? AND password = ?", req.Email, req.Password).First(&user)
 	if res.Error != nil {
 		if res.Error == gorm.ErrRecordNotFound {
-			return c.SendStatus(http.StatusUnauthorized)
+			return c.SendStatus(fiber.StatusUnauthorized)
 		}
 		return res.Error
 	}
@@ -337,13 +336,13 @@ func (s *HTTPServer) BookmarkUpdate(c *fiber.Ctx) error {
 func (s *HTTPServer) BookmarkDelete(c *fiber.Ctx) error {
 	id := c.Params("id")
 	if id == "" {
-		return c.Status(http.StatusBadRequest).SendString("invalid path param 'id'")
+		return c.Status(fiber.StatusBadRequest).SendString("invalid path param 'id'")
 	}
 	res := s.db.Delete(&db.Bookmark{}, id)
 	if res.Error != nil {
 		return res.Error
 	}
-	return c.SendStatus(http.StatusNoContent)
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 func (s *HTTPServer) TagGet(c *fiber.Ctx) error {
@@ -432,13 +431,13 @@ func (s *HTTPServer) TagUpdate(c *fiber.Ctx) error {
 func (s *HTTPServer) TagDelete(c *fiber.Ctx) error {
 	id := c.Params("id")
 	if id == "" {
-		return c.Status(http.StatusBadRequest).SendString("invalid path param 'id'")
+		return c.Status(fiber.StatusBadRequest).SendString("invalid path param 'id'")
 	}
 	res := s.db.Delete(&db.Tag{}, id)
 	if res.Error != nil {
 		return res.Error
 	}
-	return c.SendStatus(http.StatusNoContent)
+	return c.SendStatus(fiber.StatusNoContent)
 }
 
 ////////
@@ -497,7 +496,7 @@ func GetUserFromContext(c *fiber.Ctx) (*db.User, error) {
 func GetParam(c *fiber.Ctx, name string) (string, error) {
 	value := c.Params(name)
 	if value == "" {
-		return "", c.Status(http.StatusBadRequest).SendString("invalid path param 'id'")
+		return "", c.Status(fiber.StatusBadRequest).SendString("invalid path param 'id'")
 	}
 	return value, nil
 }
