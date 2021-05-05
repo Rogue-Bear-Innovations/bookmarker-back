@@ -475,7 +475,7 @@ func BindAndValidate(c *fiber.Ctx, v interface{}) bool {
 
 	errs := ValidateStruct(v)
 	if len(errs) > 0 {
-		c.JSON(errs)
+		c.Status(fiber.StatusBadRequest).JSON(errs)
 		return false
 	}
 
