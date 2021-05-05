@@ -85,13 +85,17 @@ func NewHTTPServer(lc fx.Lifecycle, cfg *config.Config, db *gorm.DB, logger *zap
 				"request_body", string(ctx.Body()),
 				"request_headers", ctx.Request().Header.String(),
 				"request_query", string(ctx.Request().URI().QueryString()),
+				"response_status", ctx.Response().StatusCode(),
 			)
-			code := fiber.StatusInternalServerError
-			if e, ok := err.(*fiber.Error); ok {
-				code = e.Code
+
+			code := ctx.Response().StatusCode()
+			if code == fiber.StatusOK { // we know that something went wrong here, but they might not set status
+				code = fiber.StatusInternalServerError
 			}
 			ctx.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
 			ctx.Status(code)
+
+			// don't send internal error messages
 			if code == fiber.StatusInternalServerError {
 				return ctx.SendString("Internal Server Error")
 			}
