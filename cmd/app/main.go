@@ -16,10 +16,13 @@ func main() {
 		config.Module,
 		fx.Provide(
 			func() (*zap.SugaredLogger, error) {
-				l, err := zap.NewProduction()
+				cfg := zap.NewProductionConfig()
+				cfg.OutputPaths = []string{"stdout"}
+				l, err := cfg.Build()
 				if err != nil {
 					return nil, err
 				}
+
 				s := l.Sugar()
 				return s, nil
 			},

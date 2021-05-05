@@ -2,7 +2,6 @@ package transport
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"time"
 
@@ -138,7 +137,6 @@ func NewHTTPServer(lc fx.Lifecycle, cfg *config.Config, db *gorm.DB, logger *zap
 }
 
 func (s *HTTPServer) AuthMiddleware(c *fiber.Ctx) error {
-	fmt.Println("running middleware")
 	token := c.Get("x-token")
 	if token == "" {
 		return c.SendStatus(fiber.StatusUnauthorized)
