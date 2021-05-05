@@ -34,7 +34,14 @@ type (
 		Password string `json:"password" validate:"required"`
 	}
 
-	BookmarkReq struct {
+	BookmarkUpdateReq struct {
+		Name        *string  `json:"name"`
+		Description *string  `json:"description"`
+		Link        *string  `json:"link"`
+		Tags        []uint64 `json:"tags"`
+	}
+
+	BookmarkCreateReq struct {
 		Name        *string  `json:"name"`
 		Description *string  `json:"description"`
 		Link        *string  `json:"link"`
@@ -79,7 +86,16 @@ func NewHTTPServer(lc fx.Lifecycle, cfg *config.Config, db *gorm.DB, logger *zap
 				"request_headers", ctx.Request().Header.String(),
 				"request_query", string(ctx.Request().URI().QueryString()),
 			)
-			return fiber.DefaultErrorHandler(ctx, err)
+			code := fiber.StatusInternalServerError
+			if e, ok := err.(*fiber.Error); ok {
+				code = e.Code
+			}
+			ctx.Set(fiber.HeaderContentType, fiber.MIMETextPlainCharsetUTF8)
+			ctx.Status(code)
+			if code == fiber.StatusInternalServerError {
+				return ctx.SendString("Internal Server Error")
+			}
+			return ctx.SendString(err.Error())
 		},
 	})
 
@@ -190,10 +206,17 @@ func (s *HTTPServer) Login(c *fiber.Ctx) error {
 		}
 		return res.Error
 	}
+
+	token := uuid.New().String()
+	res = s.db.Model(&user).Update("token", token)
+	if res.Error != nil {
+		return errors.Wrap(res.Error, "update token")
+	}
+
 	resp := struct {
 		Token string `json:"token"`
 	}{
-		Token: user.Token,
+		Token: token,
 	}
 	return c.JSON(&resp)
 }
@@ -249,9 +272,16 @@ func (s *HTTPServer) BookmarkCreate(c *fiber.Ctx) error {
 		return err
 	}
 
-	req := BookmarkReq{}
+	req := BookmarkCreateReq{}
 	if err := BindAndValidate(c, &req); err != nil {
 		return err
+	}
+
+	if len(req.Tags) == 0 &&
+		(req.Name == nil || *req.Name == "") &&
+		(req.Description == nil || *req.Description == "") &&
+		(req.Link == nil || *req.Link == "") {
+		return c.Status(fiber.StatusBadRequest).SendString("you cannot create a completely empty bookmark")
 	}
 
 	newTags := make([]db.Tag, len(req.Tags))
@@ -294,7 +324,7 @@ func (s *HTTPServer) BookmarkUpdate(c *fiber.Ctx) error {
 		return err
 	}
 
-	req := BookmarkReq{}
+	req := BookmarkUpdateReq{}
 	if err := BindAndValidate(c, &req); err != nil {
 		return err
 	}
@@ -321,7 +351,12 @@ func (s *HTTPServer) BookmarkUpdate(c *fiber.Ctx) error {
 
 	res := s.db.Model(&model).Updates(&model)
 	if res.Error != nil {
-		return res.Error
+		return errors.Wrap(res.Error, "update model")
+	}
+
+	res = s.db.First(&model)
+	if res.Error != nil {
+		return errors.Wrap(res.Error, "get model")
 	}
 
 	return c.JSON(BookmarkResp{
@@ -503,7 +538,7 @@ func GetUserFromContext(c *fiber.Ctx) (*db.User, error) {
 func GetParam(c *fiber.Ctx, name string) (string, error) {
 	value := c.Params(name)
 	if value == "" {
-		return "", c.Status(fiber.StatusBadRequest).SendString("invalid path param 'id'")
+		return "", c.Status(fiber.StatusBadRequest).SendString(fmt.Sprintf("invalid path param '%s'", name))
 	}
 	return value, nil
 }
