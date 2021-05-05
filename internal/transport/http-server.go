@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -154,8 +155,8 @@ func (s *HTTPServer) AuthMiddleware(c *fiber.Ctx) error {
 
 func (s *HTTPServer) Register(c *fiber.Ctx) error {
 	req := RegisterReq{}
-	if ok := BindAndValidate(c, &req); !ok {
-		return nil
+	if err := BindAndValidate(c, &req); err != nil {
+		return err
 	}
 
 	token := uuid.New().String()
@@ -177,8 +178,8 @@ func (s *HTTPServer) Register(c *fiber.Ctx) error {
 
 func (s *HTTPServer) Login(c *fiber.Ctx) error {
 	req := LoginReq{}
-	if ok := BindAndValidate(c, &req); !ok {
-		return nil
+	if err := BindAndValidate(c, &req); err != nil {
+		return err
 	}
 
 	user := db.User{}
@@ -200,12 +201,12 @@ func (s *HTTPServer) Login(c *fiber.Ctx) error {
 func (s *HTTPServer) BookmarkGet(c *fiber.Ctx) error {
 	user, err := GetUserFromContext(c)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "get user from context")
 	}
 
 	req := BookmarkReqList{}
-	if ok := BindAndValidate(c, &req); !ok {
-		return nil
+	if err := BindAndValidate(c, &req); err != nil {
+		return err
 	}
 
 	w := squirrel.Eq{
@@ -221,13 +222,13 @@ func (s *HTTPServer) BookmarkGet(c *fiber.Ctx) error {
 		Where(w).
 		ToSql()
 	if err != nil {
-		return err
+		return errors.Wrap(err, "build sql")
 	}
 
 	bookmarks := make([]db.Bookmark, 0)
 	res := s.db.Raw(sql, args...).Scan(&bookmarks)
 	if res.Error != nil {
-		return res.Error
+		return errors.Wrap(res.Error, "scan")
 	}
 
 	resp := make([]BookmarkResp, len(bookmarks))
@@ -249,8 +250,8 @@ func (s *HTTPServer) BookmarkCreate(c *fiber.Ctx) error {
 	}
 
 	req := BookmarkReq{}
-	if ok := BindAndValidate(c, &req); !ok {
-		return nil
+	if err := BindAndValidate(c, &req); err != nil {
+		return err
 	}
 
 	newTags := make([]db.Tag, len(req.Tags))
@@ -294,8 +295,8 @@ func (s *HTTPServer) BookmarkUpdate(c *fiber.Ctx) error {
 	}
 
 	req := BookmarkReq{}
-	if ok := BindAndValidate(c, &req); !ok {
-		return nil
+	if err := BindAndValidate(c, &req); err != nil {
+		return err
 	}
 
 	newTags := make([]db.Tag, len(req.Tags))
@@ -372,13 +373,13 @@ func (s *HTTPServer) TagCreate(c *fiber.Ctx) error {
 	}
 
 	req := TagReq{}
-	if ok := BindAndValidate(c, &req); !ok {
-		return nil
+	if err := BindAndValidate(c, &req); err != nil {
+		return err
 	}
 
 	model := db.Tag{
 		Name:   req.Name,
-		UserID: uint64(user.ID),
+		UserID: user.ID,
 	}
 
 	res := s.db.Create(&model)
@@ -403,8 +404,8 @@ func (s *HTTPServer) TagUpdate(c *fiber.Ctx) error {
 	}
 
 	req := TagReq{}
-	if ok := BindAndValidate(c, &req); !ok {
-		return nil
+	if err := BindAndValidate(c, &req); err != nil {
+		return err
 	}
 
 	model := db.Tag{
@@ -412,7 +413,7 @@ func (s *HTTPServer) TagUpdate(c *fiber.Ctx) error {
 			ID: id,
 		},
 		Name:   req.Name,
-		UserID: uint64(user.ID),
+		UserID: user.ID,
 	}
 
 	res := s.db.Model(&model).Updates(&model)
@@ -446,6 +447,10 @@ type ErrorResponse struct {
 	Value       string
 }
 
+func (e *ErrorResponse) String() string {
+	return fmt.Sprintf("FailedField: %s; Tag: %s; Value: %s", e.FailedField, e.Tag, e.Value)
+}
+
 func ValidateStruct(v interface{}) []*ErrorResponse {
 	var errs []*ErrorResponse
 	validate := validator.New()
@@ -462,21 +467,25 @@ func ValidateStruct(v interface{}) []*ErrorResponse {
 	return errs
 }
 
-func BindAndValidate(c *fiber.Ctx, v interface{}) bool {
+func BindAndValidate(c *fiber.Ctx, v interface{}) error {
 	if err := c.BodyParser(v); err != nil {
 		c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"message": err.Error(),
 		})
-		return false
+		return errors.Wrap(err, "parse body")
 	}
 
 	errs := ValidateStruct(v)
 	if len(errs) > 0 {
 		c.Status(fiber.StatusBadRequest).JSON(errs)
-		return false
+		errStr := ""
+		for i := range errs {
+			errStr += errs[i].String() + "; "
+		}
+		return errors.New(fmt.Sprintf("validation error: %s", errStr))
 	}
 
-	return true
+	return nil
 }
 
 func GetUserFromContext(c *fiber.Ctx) (*db.User, error) {
