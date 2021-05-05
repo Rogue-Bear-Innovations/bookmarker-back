@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -21,6 +22,8 @@ import (
 	"github.com/Rogue-Bear-Innovations/bookmarker-back/internal/db"
 
 	"github.com/gofiber/fiber/v2"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type (
@@ -78,11 +81,13 @@ func NewHTTPServer(lc fx.Lifecycle, cfg *config.Config, db *gorm.DB, logger *zap
 	app := fiber.New(fiber.Config{
 		IdleTimeout: time.Second * 30,
 		ErrorHandler: func(ctx *fiber.Ctx, err error) error {
+			censoredBodyB := censorBody(ctx.Body())
+
 			logger.Errorw("request failed",
 				"error", err,
 				"path", ctx.Path(),
 				"method", ctx.Method(),
-				"request_body", string(ctx.Body()),
+				"request_body", string(censoredBodyB),
 				"request_headers", ctx.Request().Header.String(),
 				"request_query", string(ctx.Request().URI().QueryString()),
 				"response_status", ctx.Response().StatusCode(),
@@ -179,10 +184,15 @@ func (s *HTTPServer) Register(c *fiber.Ctx) error {
 		return err
 	}
 
+	passwordHashB, err := bcrypt.GenerateFromPassword([]byte(req.Password), 14)
+	if err != nil {
+		return errors.Wrap(err, "generate password hash")
+	}
+
 	token := uuid.New().String()
 	res := s.db.Create(&db.User{
 		Email:    req.Email,
-		Password: req.Password,
+		Password: string(passwordHashB),
 		Token:    token,
 	})
 	if res.Error != nil {
@@ -203,12 +213,16 @@ func (s *HTTPServer) Login(c *fiber.Ctx) error {
 	}
 
 	user := db.User{}
-	res := s.db.Where("email = ? AND password = ?", req.Email, req.Password).First(&user)
+	res := s.db.Where("email = ?", req.Email).First(&user)
 	if res.Error != nil {
 		if res.Error == gorm.ErrRecordNotFound {
 			return c.SendStatus(fiber.StatusUnauthorized)
 		}
 		return res.Error
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
+		return c.SendStatus(fiber.StatusUnauthorized)
 	}
 
 	token := uuid.New().String()
@@ -557,4 +571,20 @@ func GetAndParseParam(c *fiber.Ctx, name string) (uint64, error) {
 		return 0, e
 	}
 	return vv, nil
+}
+
+func censorBody(requestBodyB []byte) []byte {
+	parsedBody := map[string]interface{}{}
+	unmarshalErr := json.Unmarshal(requestBodyB, &parsedBody)
+	if unmarshalErr == nil {
+		_, ok := parsedBody["password"]
+		if ok {
+			parsedBody["password"] = "$censored"
+		}
+		newRequestBodyB, err := json.Marshal(&parsedBody)
+		if err == nil {
+			requestBodyB = newRequestBodyB
+		}
+	}
+	return requestBodyB
 }
