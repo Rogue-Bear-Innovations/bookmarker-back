@@ -28,3 +28,8 @@ You may also need to configure Heroku PostgreSQL as well as the environment vari
 ```shell
 make heroku-logs
 ```
+
+## gRPC
+```shell
+make proto-generate
+```
