@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+option go_package = "internal/proto";
+
+message Bookmark {
+  uint64 Id = 1;
+  optional string Name = 2;
+  optional string Link = 3;
+  optional string Description = 4;
+}
+
+message GetBookmarksRequest {
+  optional uint64 Id = 1;
+  repeated string Tags = 2;
+}
+
+message GetBookmarksResponse {
+  repeated Bookmark items = 1;
+}
+
+service Bookmarker {
+  rpc GetBookmarks(GetBookmarksRequest) returns (GetBookmarksResponse) {}
+}

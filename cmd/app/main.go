@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/Rogue-Bear-Innovations/bookmarker-back/internal/service"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 
@@ -14,6 +15,7 @@ func main() {
 		transport.Module,
 		db.Module,
 		config.Module,
+		service.Module,
 		fx.Provide(
 			func() (*zap.SugaredLogger, error) {
 				l, err := zap.NewProduction()

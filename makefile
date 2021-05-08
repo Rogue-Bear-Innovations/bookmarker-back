@@ -19,3 +19,6 @@ deploy-heroku:
 
 heroku-logs:
 	heroku logs --tail -a the-ultimate-bookmarker-app
+
+proto-generate: # just to remember, because - and _ are so easy to recognize and then not to spend 2 hours debugging why it's not working
+	protoc --go_out=. --go-grpc_out=. ./internal/proto/server.proto

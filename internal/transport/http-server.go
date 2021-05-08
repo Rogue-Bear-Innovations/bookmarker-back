@@ -4,15 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Rogue-Bear-Innovations/bookmarker-back/internal/service"
 	"strconv"
 	"time"
 
-	"github.com/Masterminds/squirrel"
 	"github.com/go-playground/validator"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	fiberLogger "github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
-	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -22,8 +21,6 @@ import (
 	"github.com/Rogue-Bear-Innovations/bookmarker-back/internal/db"
 
 	"github.com/gofiber/fiber/v2"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 type (
@@ -71,13 +68,18 @@ type (
 		Name string `json:"name"`
 	}
 
+	LoginResp struct {
+		Token string `json:"token"`
+	}
+
 	HTTPServer struct {
-		db     *gorm.DB
-		logger *zap.SugaredLogger
+		db             *gorm.DB
+		generalService *service.General
+		logger         *zap.SugaredLogger
 	}
 )
 
-func NewHTTPServer(lc fx.Lifecycle, cfg *config.Config, db *gorm.DB, logger *zap.SugaredLogger) *HTTPServer {
+func NewHTTPServer(lc fx.Lifecycle, cfg *config.Config, db *gorm.DB, general *service.General, logger *zap.SugaredLogger) *HTTPServer {
 	app := fiber.New(fiber.Config{
 		IdleTimeout: time.Second * 30,
 		ErrorHandler: func(ctx *fiber.Ctx, err error) error {
@@ -109,8 +111,9 @@ func NewHTTPServer(lc fx.Lifecycle, cfg *config.Config, db *gorm.DB, logger *zap
 	})
 
 	instance := HTTPServer{
-		db:     db,
-		logger: logger,
+		db:             db,
+		generalService: general,
+		logger:         logger,
 	}
 
 	// middlewares
@@ -184,19 +187,9 @@ func (s *HTTPServer) Register(c *fiber.Ctx) error {
 		return err
 	}
 
-	passwordHashB, err := bcrypt.GenerateFromPassword([]byte(req.Password), 14)
+	token, err := s.generalService.Register(req.Email, req.Password)
 	if err != nil {
-		return errors.Wrap(err, "generate password hash")
-	}
-
-	token := uuid.New().String()
-	res := s.db.Create(&db.User{
-		Email:    req.Email,
-		Password: string(passwordHashB),
-		Token:    token,
-	})
-	if res.Error != nil {
-		return res.Error
+		return errors.Wrap(err, "service register")
 	}
 	resp := struct {
 		Token string `json:"token"`
@@ -212,31 +205,16 @@ func (s *HTTPServer) Login(c *fiber.Ctx) error {
 		return err
 	}
 
-	user := db.User{}
-	res := s.db.Where("email = ?", req.Email).First(&user)
-	if res.Error != nil {
-		if res.Error == gorm.ErrRecordNotFound {
+	token, err := s.generalService.Login(req.Email, req.Password)
+	if err != nil {
+		if errors.Is(err, service.ErrLoginUserNotFound) ||
+			errors.Is(err, service.ErrLoginPasswordDoesNotMatch) {
 			return c.SendStatus(fiber.StatusUnauthorized)
 		}
-		return res.Error
+		return errors.Wrap(err, "service login")
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
-		return c.SendStatus(fiber.StatusUnauthorized)
-	}
-
-	token := uuid.New().String()
-	res = s.db.Model(&user).Update("token", token)
-	if res.Error != nil {
-		return errors.Wrap(res.Error, "update token")
-	}
-
-	resp := struct {
-		Token string `json:"token"`
-	}{
-		Token: token,
-	}
-	return c.JSON(&resp)
+	return c.JSON(&LoginResp{Token: token})
 }
 
 func (s *HTTPServer) BookmarkGet(c *fiber.Ctx) error {
@@ -250,26 +228,9 @@ func (s *HTTPServer) BookmarkGet(c *fiber.Ctx) error {
 		return err
 	}
 
-	w := squirrel.Eq{
-		"b.user_id": user.ID,
-	}
-	if len(req.Tags) != 0 {
-		w["tb.tag_id"] = req.Tags
-	}
-	sql, args, err := squirrel.
-		Select("b.id", "b.link", "b.name", "b.description").From("bookmarks b").
-		LeftJoin("tag_bookmarks tb ON b.id = tb.bookmark_id").
-		OrderBy("b.id").
-		Where(w).
-		ToSql()
+	bookmarks, err := s.generalService.BookmarkGet(user, req.Tags)
 	if err != nil {
-		return errors.Wrap(err, "build sql")
-	}
-
-	bookmarks := make([]db.Bookmark, 0)
-	res := s.db.Raw(sql, args...).Scan(&bookmarks)
-	if res.Error != nil {
-		return errors.Wrap(res.Error, "scan")
+		return errors.Wrap(err, "general get bookmarks")
 	}
 
 	resp := make([]BookmarkResp, len(bookmarks))
@@ -302,33 +263,16 @@ func (s *HTTPServer) BookmarkCreate(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).SendString("you cannot create a completely empty bookmark")
 	}
 
-	newTags := make([]db.Tag, len(req.Tags))
-	for i := range req.Tags {
-		newTags[i] = db.Tag{
-			GormForkedModel: db.GormForkedModel{
-				ID: req.Tags[i],
-			},
-		}
-	}
-
-	model := db.Bookmark{
-		Name:        req.Name,
-		Link:        req.Link,
-		Description: req.Description,
-		UserID:      user.ID,
-		Tags:        newTags,
-	}
-
-	res := s.db.Create(&model)
-	if res.Error != nil {
-		return res.Error
+	bookmark, err := s.generalService.BookmarkCreate(user, req.Name, req.Description, req.Link, req.Tags)
+	if err != nil {
+		return errors.Wrap(err, "service create")
 	}
 
 	return c.JSON(BookmarkResp{
-		ID:          model.ID,
-		Name:        model.Name,
-		Link:        model.Link,
-		Description: model.Description,
+		ID:          bookmark.ID,
+		Name:        bookmark.Name,
+		Link:        bookmark.Link,
+		Description: bookmark.Description,
 	})
 }
 
@@ -347,34 +291,9 @@ func (s *HTTPServer) BookmarkUpdate(c *fiber.Ctx) error {
 		return err
 	}
 
-	newTags := make([]db.Tag, len(req.Tags))
-	for i := range req.Tags {
-		newTags[i] = db.Tag{
-			GormForkedModel: db.GormForkedModel{
-				ID: req.Tags[i],
-			},
-		}
-	}
-
-	model := db.Bookmark{
-		GormForkedModel: db.GormForkedModel{
-			ID: id,
-		},
-		Name:        req.Name,
-		Link:        req.Link,
-		Description: req.Description,
-		UserID:      user.ID,
-		Tags:        newTags,
-	}
-
-	res := s.db.Model(&model).Updates(&model)
-	if res.Error != nil {
-		return errors.Wrap(res.Error, "update model")
-	}
-
-	res = s.db.First(&model)
-	if res.Error != nil {
-		return errors.Wrap(res.Error, "get model")
+	model, err := s.generalService.BookmarkUpdate(user, id, req.Tags, req.Name, req.Description, req.Link)
+	if err != nil {
+		return errors.Wrap(err, "service update")
 	}
 
 	return c.JSON(BookmarkResp{
@@ -386,14 +305,21 @@ func (s *HTTPServer) BookmarkUpdate(c *fiber.Ctx) error {
 }
 
 func (s *HTTPServer) BookmarkDelete(c *fiber.Ctx) error {
-	id := c.Params("id")
-	if id == "" {
-		return c.Status(fiber.StatusBadRequest).SendString("invalid path param 'id'")
+	user, err := GetUserFromContext(c)
+	if err != nil {
+		return err
 	}
-	res := s.db.Delete(&db.Bookmark{}, id)
-	if res.Error != nil {
-		return res.Error
+
+	id, err := GetAndParseParam(c, "id")
+	if err != nil {
+		return err
 	}
+
+	err = s.generalService.BookmarkDelete(id, user)
+	if err != nil {
+		return err
+	}
+
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
@@ -403,10 +329,9 @@ func (s *HTTPServer) TagGet(c *fiber.Ctx) error {
 		return err
 	}
 
-	tags := make([]db.Tag, 0)
-	res := s.db.Where("user_id = ?", user.ID).Find(&tags)
-	if res.Error != nil {
-		return res.Error
+	tags, err := s.generalService.TagGet(user.ID)
+	if err != nil {
+		return err
 	}
 
 	resp := make([]TagResp, len(tags))
@@ -430,14 +355,9 @@ func (s *HTTPServer) TagCreate(c *fiber.Ctx) error {
 		return err
 	}
 
-	model := db.Tag{
-		Name:   req.Name,
-		UserID: user.ID,
-	}
-
-	res := s.db.Create(&model)
-	if res.Error != nil {
-		return res.Error
+	model, err := s.generalService.TagCreate(user.ID, req.Name)
+	if err != nil {
+		return err
 	}
 
 	return c.JSON(TagResp{
@@ -461,17 +381,9 @@ func (s *HTTPServer) TagUpdate(c *fiber.Ctx) error {
 		return err
 	}
 
-	model := db.Tag{
-		GormForkedModel: db.GormForkedModel{
-			ID: id,
-		},
-		Name:   req.Name,
-		UserID: user.ID,
-	}
-
-	res := s.db.Model(&model).Updates(&model)
-	if res.Error != nil {
-		return res.Error
+	model, err := s.generalService.TagUpdate(id, user.ID, req.Name)
+	if err != nil {
+		return err
 	}
 
 	return c.JSON(TagResp{
@@ -481,14 +393,20 @@ func (s *HTTPServer) TagUpdate(c *fiber.Ctx) error {
 }
 
 func (s *HTTPServer) TagDelete(c *fiber.Ctx) error {
-	id := c.Params("id")
-	if id == "" {
-		return c.Status(fiber.StatusBadRequest).SendString("invalid path param 'id'")
+	id, err := GetAndParseParam(c, "id")
+	if err != nil {
+		return err
 	}
-	res := s.db.Delete(&db.Tag{}, id)
-	if res.Error != nil {
-		return res.Error
+	user, err := GetUserFromContext(c)
+	if err != nil {
+		return err
 	}
+
+	err = s.generalService.TagDelete(id, user.ID)
+	if err != nil {
+		return err
+	}
+
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
